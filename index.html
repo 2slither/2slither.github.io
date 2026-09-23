@@ -2249,7 +2249,7 @@
                         // Blend heading + bend for a lively but stable look
                         let diff = ((bendDir - snake.direction + Math.PI * 3) % (Math.PI * 2)) - Math.PI;
                         lookDir = snake.direction + diff * 0.5;
-                    }m
+                    }
 
                     targetX = head.x + Math.cos(lookDir) * 200;
                     targetY = head.y + Math.sin(lookDir) * 200;
