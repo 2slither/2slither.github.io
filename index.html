@@ -2791,7 +2791,7 @@
 
         function initMultiplayer() {
             try {
-                mpSocket = new WebSocket('ws://132.226.129.231:3001');
+                mpSocket = new WebSocket('wss://2slither.duckdns.org/ws');
 
                 mpSocket.addEventListener('open', () => {
                     mpStatus = 'connected';
