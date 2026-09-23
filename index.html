@@ -785,7 +785,7 @@
 
         // ========== GAME CONSTANTS ==========
         const FOOD_COUNT = 1500;
-        const AI_COUNT = 30;
+        const AI_COUNT = 85;
                 const WORLD_SIZE = { width: 8000, height: 8000 };
         const ARENA_CENTER_X = WORLD_SIZE.width / 2;
         const ARENA_CENTER_Y = WORLD_SIZE.height / 2;
@@ -1263,15 +1263,15 @@
                 }
             });
 
-            // ---- Remote player collisions (SWEPT) ----
-            // We check the player head's PATH this frame against the remote's
-            // spine at its CURRENT position. This catches fast-closing cases
-            // where either snake moved more than a body radius in one frame.
+                                    // ---- Remote player collisions (same rules as AI) ----
             for (const remote of remoteSnakes.values()) {
                 if (!remote.isAlive) continue;
                 if (!remote.segments || remote.segments.length < 2) continue;
 
-                // Remote bounding box (whole body, not just head)
+                // Compute the remote's own bounding box from its SEGMENTS,
+                // not just its head. This is the actual fix — the old code
+                // only checked the remote's head, so you could pass through
+                // a long remote body when their head was far away.
                 let rMinX = Infinity, rMaxX = -Infinity;
                 let rMinY = Infinity, rMaxY = -Infinity;
                 const sampleStep = Math.max(1, Math.floor(remote.segments.length / 12));
@@ -1282,48 +1282,27 @@
                     if (s.y < rMinY) rMinY = s.y;
                     if (s.y > rMaxY) rMaxY = s.y;
                 }
+                // Always include the tail (it's often the furthest point)
                 const lastSeg = remote.segments[remote.segments.length - 1];
                 if (lastSeg.x < rMinX) rMinX = lastSeg.x;
                 if (lastSeg.x > rMaxX) rMaxX = lastSeg.x;
                 if (lastSeg.y < rMinY) rMinY = lastSeg.y;
                 if (lastSeg.y > rMaxY) rMaxY = lastSeg.y;
 
-                // Cull: also expand by swept margin so tunnelling is caught
-                const SWEPT_MARGIN = 30;
-                if (rMaxX + SWEPT_MARGIN < pbMinX || rMinX - SWEPT_MARGIN > pbMaxX) continue;
-                if (rMaxY + SWEPT_MARGIN < pbMinY || rMinY - SWEPT_MARGIN > pbMaxY) continue;
+                // Cull: only skip if the two bounding boxes don't overlap
+                if (rMaxX < pbMinX || rMinX > pbMaxX) continue;
+                if (rMaxY < pbMinY || rMinY > pbMaxY) continue;
 
                 const remoteSpine = getSpinePoints(remote);
 
-                // Player head path this frame
-                const px0 = playerSnake._prevX ?? playerSnake.x;
-                const py0 = playerSnake._prevY ?? playerSnake.y;
-                const px1 = playerSnake.x;
-                const py1 = playerSnake.y;
-                const pathDx = px1 - px0;
-                const pathDy = py1 - py0;
-                const pathLenSq = pathDx * pathDx + pathDy * pathDy;
-
-                // For each remote spine point, check if the player's head path
-                // came within hitbox distance of it at any moment this frame.
+                // Our head vs their body
                 const startIdx = isBoosting ? 0 : 1;
                 for (let i = startIdx; i < remoteSpine.length; i++) {
                     const pt = remoteSpine[i];
+                    const dx = playerHeadX - pt.x;
+                    const dy = playerHeadY - pt.y;
                     const minDist = playerHeadRadius + pt.radius;
-                    const minDistSq = minDist * minDist;
-
-                    // Standard swept-circle vs point test:
-                    // Find the closest point on the path to `pt`
-                    let u = 0;
-                    if (pathLenSq > 0.0001) {
-                        u = ((pt.x - px0) * pathDx + (pt.y - py0) * pathDy) / pathLenSq;
-                        u = Math.max(0, Math.min(1, u));
-                    }
-                    const cx = px0 + pathDx * u;
-                    const cy = py0 + pathDy * u;
-                    const dx = cx - pt.x;
-                    const dy = cy - pt.y;
-                    if (dx * dx + dy * dy < minDistSq) {
+                    if (dx * dx + dy * dy < minDist * minDist) {
                         killSnake(playerSnake);
                         return;
                     }
@@ -1339,10 +1318,15 @@
                             killSnake(playerSnake);
                             return;
                         }
+                        // If we're bigger, do nothing — they'll detect their own death
                     }
                 }
+
+                // Their head vs our body — they detect it on their end.
+                // We don't kill them from here.
             }
         }
+
         function killSnake(snake) {
             if (!snake.isAlive) return;
             snake.isAlive = false;
@@ -1530,29 +1514,7 @@
             if (!gameStarted) return;
             gameTime++;
 
-                        // Store previous positions for swept collision checks
-            if (playerSnake.isAlive) {
-                playerSnake._prevX = playerSnake._prevX ?? playerSnake.x;
-                playerSnake._prevY = playerSnake._prevY ?? playerSnake.y;
-            }
-
-            for (const remote of remoteSnakes.values()) {
-                if (!remote.segments || remote.segments.length === 0) continue;
-                remote._prevHeadX = remote._prevHeadX ?? remote.x;
-                remote._prevHeadY = remote._prevHeadY ?? remote.y;
-            }
-
-                        // Store previous positions for swept collision checks
-            if (playerSnake.isAlive) {
-                playerSnake._prevX = playerSnake._prevX ?? playerSnake.x;
-                playerSnake._prevY = playerSnake._prevY ?? playerSnake.y;
-            }
-
-            for (const remote of remoteSnakes.values()) {
-                if (!remote.segments || remote.segments.length === 0) continue;
-                remote._prevHeadX = remote._prevHeadX ?? remote.x;
-                remote._prevHeadY = remote._prevHeadY ?? remote.y;
-            }
+            checkCollisions();
 
             // ---- PLAYER SNAKE ----
             if (playerSnake.isAlive) {
@@ -1648,10 +1610,6 @@
                 playerSnake.x += Math.cos(playerSnake.direction) * speed;
                 playerSnake.y += Math.sin(playerSnake.direction) * speed;
 
-                // Update prev for next frame's swept check
-                playerSnake._prevX = playerSnake.x;
-                playerSnake._prevY = playerSnake.y;
-
                                 // ---- LASER BOUNDARY: head out = instant death ----
                 const headDx = playerSnake.x - ARENA_CENTER_X;
                 const headDy = playerSnake.y - ARENA_CENTER_Y;
@@ -1725,9 +1683,6 @@
 
                 remote.x = older.x + (newer.x - older.x) * t;
                 remote.y = older.y + (newer.y - older.y) * t;
-
-                remote._prevHeadX = remote.x;
-                remote._prevHeadY = remote.y;
 
                 let dDiff = ((newer.dir - older.dir + Math.PI * 3) % (Math.PI * 2)) - Math.PI;
                 remote.direction = older.dir + dDiff * t;
@@ -1995,8 +1950,6 @@
             }
 
             if (gameTime % 10 === 0) updateLeaderboard();
-
-             checkCollisions();
         }
 
         function render() {
@@ -2377,21 +2330,19 @@
                     // flick visibly when the remote player wiggles their mouse.
                     let lookDir = snake.direction;
 
-                                        if (snake.segments && snake.segments.length >= 3) {
+                    if (snake.segments && snake.segments.length >= 3) {
+                        // Bend between the head and the 3rd segment reveals intent
                         const s2 = snake.segments[2];
-                        const dxb = head.x - s2.x;
-                        const dyb = head.y - s2.y;
-                        const distSqB = dxb * dxb + dyb * dyb;
+                        const bendDir = Math.atan2(head.y - s2.y, head.x - s2.x);
 
-                        // Only use the bend when the head and s2 are meaningfully
-                        // apart. Otherwise Math.atan2(0,0) returns 0 and the
-                        // eyes snap sideways for a frame.
-                        if (distSqB > 4) {
-                            const bendDir = Math.atan2(dyb, dxb);
-                            let diff = ((bendDir - snake.direction + Math.PI * 3) % (Math.PI * 2)) - Math.PI;
-                            lookDir = snake.direction + diff * 0.5;
-                        }
+                        // Blend heading + bend for a lively but stable look
+                        let diff = ((bendDir - snake.direction + Math.PI * 3) % (Math.PI * 2)) - Math.PI;
+                        lookDir = snake.direction + diff * 0.5;
                     }
+
+                    targetX = head.x + Math.cos(lookDir) * 200;
+                    targetY = head.y + Math.sin(lookDir) * 200;
+                }
 
                 const eyeSize = head.size * 0.28;
                 const eyeOffset = head.size * 0.55;
@@ -2977,26 +2928,14 @@
 
                     if (msg.type === 'welcome') {
                         mpId = msg.id;
-                         } else if (msg.type === 'snakes') {
-                        let now = performance.now();
+                                                                                } else if (msg.type === 'snakes') {
+                        const now = performance.now();
                         const seen = new Set();
 
                         for (const s of msg.snakes) {
                             if (s.id === mpId) continue;
                             if (s.x == null) continue;
                             seen.add(s.id);
-
-                                                        // Ensure arrival timestamps are monotonic per-snake,
-                            // so burst arrivals don't collapse into a zero-span
-                            // and cause inter-frame jitter.
-                            if (remote) {
-                                const lastT = remote.snapshots.length
-                                    ? remote.snapshots[remote.snapshots.length - 1].time
-                                    : 0;
-                                if (now <= lastT) {
-                                    now = lastT + 1; // shadowed; see note below
-                                }
-                            }
 
                             let remote = remoteSnakes.get(s.id);
                             if (!remote) {
