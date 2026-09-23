@@ -1554,8 +1554,6 @@
                 remote._prevHeadY = remote._prevHeadY ?? remote.y;
             }
 
-            checkCollisions();
-
             // ---- PLAYER SNAKE ----
             if (playerSnake.isAlive) {
                 const now = performance.now();
@@ -1997,6 +1995,8 @@
             }
 
             if (gameTime % 10 === 0) updateLeaderboard();
+
+             checkCollisions();
         }
 
         function render() {
