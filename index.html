@@ -1627,10 +1627,12 @@
                     document.getElementById('mass').textContent = `${Math.floor(playerSnake.length)} length`;
 
                     // ---- MULTIPLAYER: broadcast our snake ----
-                    if (mpSocket && mpSocket.readyState === 1) {
-                        mpSendTimer++;
-                        if (mpSendTimer >= 2) {   // ~30 Hz
-                            mpSendTimer = 0;
+                                        // ---- MULTIPLAYER: broadcast our snake (real-time based) ----
+                    const sendNow = performance.now();
+                    if (mpSocket && mpSocket.readyState === 1 &&
+                        sendNow - mpLastSendTime >= MP_SEND_INTERVAL_MS) {
+                        mpLastSendTime = sendNow;
+                        {
                             mpSocket.send(JSON.stringify({
                                 type: 'update',
                                 x: Math.round(playerSnake.x * 10) / 10,
@@ -1665,22 +1667,47 @@
                         break;
                     }
                 }
-                                if (!older) { older = snaps[0]; newer = snaps[0]; }
-                if (!newer) { older = snaps[snaps.length - 1]; newer = snaps[snaps.length - 1]; }
+                                                let t;
+                const lastIdx = snaps.length - 1;
 
-                const span = (newer.time - older.time) || 1;
-
-                // If the gap between the two snapshots is bigger than expected,
-                // the remote went quiet (packet loss / tab throttled). Just
-                // snap to the newest position rather than interpolating across
-                // a long dead window — avoids the long-glide-then-jump effect.
-                if (span > 350) {
-                    older = snaps[snaps.length - 1];
-                    newer = snaps[snaps.length - 1];
+                if (playbackTime <= snaps[0].time) {
+                    // Buffer hasn't caught up yet — hold on oldest pose,
+                    // but keep advancing t slightly so we don't freeze.
+                    older = snaps[0];
+                    newer = snaps.length > 1 ? snaps[1] : snaps[0];
+                    t = 0;
+                } else if (playbackTime >= snaps[lastIdx].time) {
+                    // We're ahead of the buffer — the network is late.
+                    // Extrapolate past the newest snapshot so the remote
+                    // keeps moving smoothly instead of freezing.
+                    if (snaps.length > 1) {
+                        older = snaps[lastIdx - 1];
+                        newer = snaps[lastIdx];
+                        const span = Math.max(1, newer.time - older.time);
+                        // Allow t to exceed 1 by up to +0.3 seconds' worth of
+                        // extrapolation. Beyond that, clamp to avoid flying
+                        // off in a random direction.
+                        const extra = (playbackTime - newer.time) / span;
+                        t = 1 + Math.min(extra, 0.3);
+                    } else {
+                        older = newer = snaps[lastIdx];
+                        t = 1;
+                    }
+                } else {
+                    // Normal case — playbackTime is inside the buffer.
+                    older = snaps[0];
+                    newer = snaps[lastIdx];
+                    for (let i = 0; i < lastIdx; i++) {
+                        if (snaps[i].time <= playbackTime && snaps[i + 1].time >= playbackTime) {
+                            older = snaps[i];
+                            newer = snaps[i + 1];
+                            break;
+                        }
+                    }
+                    const span = Math.max(1, newer.time - older.time);
+                    t = (playbackTime - older.time) / span;
+                    t = Math.max(0, Math.min(1.5, t));   // allow slight overshoot
                 }
-
-                const t = Math.max(0, Math.min(1, (playbackTime - older.time) / span));
-
                 remote.x = older.x + (newer.x - older.x) * t;
                 remote.y = older.y + (newer.y - older.y) * t;
 
@@ -2900,7 +2927,8 @@
         let mpSocket = null;
         let mpId = null;
         const remoteSnakes = new Map();
-        let mpSendTimer = 0;
+        let mpLastSendTime = 0;
+        const MP_SEND_INTERVAL_MS = 33;   // 30 Hz by wall clock
         let mpStatus = 'connecting';
 
         function initMultiplayer() {
@@ -2932,7 +2960,7 @@
                         const now = performance.now();
                         const seen = new Set();
 
-                        for (const s of msg.snakes) {
+                                                for (const s of msg.snakes) {
                             if (s.id === mpId) continue;
                             if (s.x == null) continue;
                             seen.add(s.id);
@@ -2958,8 +2986,17 @@
                                 remoteSnakes.set(s.id, remote);
                             }
 
+                            // Monotonic arrival timestamps: even if two packets
+                            // arrive in the same millisecond, give the second
+                            // one a strictly greater time so interpolation has
+                            // a real span to work with.
+                            const lastT = remote.snapshots.length
+                                ? remote.snapshots[remote.snapshots.length - 1].time
+                                : 0;
+                            const pushT = Math.max(now, lastT + 1);
+
                             remote.snapshots.push({
-                                time: now,
+                                time: pushT,
                                 x: s.x,
                                 y: s.y,
                                 dir: s.dir,
