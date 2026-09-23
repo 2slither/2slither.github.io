@@ -1605,7 +1605,7 @@
             }
 
                                                 // ---- REMOTE SNAKE PLAYBACK + LOCAL PHYSICS ----
-            const RENDER_DELAY_MS = 90;
+            const RENDER_DELAY_MS = 180;
             const playbackTime = performance.now() - RENDER_DELAY_MS;
 
             for (const remote of remoteSnakes.values()) {
@@ -1621,10 +1621,20 @@
                         break;
                     }
                 }
-                if (!older) { older = snaps[0]; newer = snaps[0]; }
+                                if (!older) { older = snaps[0]; newer = snaps[0]; }
                 if (!newer) { older = snaps[snaps.length - 1]; newer = snaps[snaps.length - 1]; }
 
                 const span = (newer.time - older.time) || 1;
+
+                // If the gap between the two snapshots is bigger than expected,
+                // the remote went quiet (packet loss / tab throttled). Just
+                // snap to the newest position rather than interpolating across
+                // a long dead window — avoids the long-glide-then-jump effect.
+                if (span > 350) {
+                    older = snaps[snaps.length - 1];
+                    newer = snaps[snaps.length - 1];
+                }
+
                 const t = Math.max(0, Math.min(1, (playbackTime - older.time) / span));
 
                 remote.x = older.x + (newer.x - older.x) * t;
@@ -2220,15 +2230,29 @@
             // ---- EYES ----
 
             // ---- EYES ----
-                        if (snake.id === 'player' || snake.size > 15) {
+                                    if (snake.id === 'player' || snake.size > 15) {
                 let targetX, targetY;
                 if (snake.id === 'player') {
                     targetX = camera.x + viewW() / 2 + Math.cos(mouseDirection) * mouseDistance;
                     targetY = camera.y + viewH() / 2 + Math.sin(mouseDirection) * mouseDistance;
                 } else {
-                    // Remote snakes look forward along their own heading
-                    targetX = head.x + Math.cos(snake.direction) * 200;
-                    targetY = head.y + Math.sin(snake.direction) * 200;
+                    // Remote snakes — eyes look at the point just AHEAD of the head,
+                    // extrapolated from the current body bend. This makes the eyes
+                    // flick visibly when the remote player wiggles their mouse.
+                    let lookDir = snake.direction;
+
+                    if (snake.segments && snake.segments.length >= 3) {
+                        // Bend between the head and the 3rd segment reveals intent
+                        const s2 = snake.segments[2];
+                        const bendDir = Math.atan2(head.y - s2.y, head.x - s2.x);
+
+                        // Blend heading + bend for a lively but stable look
+                        let diff = ((bendDir - snake.direction + Math.PI * 3) % (Math.PI * 2)) - Math.PI;
+                        lookDir = snake.direction + diff * 0.5;
+                    }m
+
+                    targetX = head.x + Math.cos(lookDir) * 200;
+                    targetY = head.y + Math.sin(lookDir) * 200;
                 }
 
                 const eyeSize = head.size * 0.28;
@@ -2862,7 +2886,7 @@
                             remote.boostRamp = remote.boostRamp + (targetBoost - remote.boostRamp) * 0.25;
 
                             while (remote.snapshots.length > 0 &&
-                                   now - remote.snapshots[0].time > 1000) {
+                                   now - remote.snapshots[0].time > 1500) {
                                 remote.snapshots.shift();
                             }
                         }
