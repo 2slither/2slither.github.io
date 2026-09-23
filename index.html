@@ -1150,7 +1150,7 @@
         }
 
         function updateLeaderboard() {
-            const all = [...aiSnakes, playerSnake].filter(s => s.isAlive);
+            const all = [...aiSnakes, playerSnake, ...remoteSnakes.values()].filter(s => s.isAlive);
             all.sort((a, b) => b.mass - a.mass);
             const top5 = all.slice(0, 5);
 
@@ -1636,6 +1636,7 @@
                 remote.targetSize = older.targetSize + (newer.targetSize - older.targetSize) * t;
                 remote.length = newer.length;
                 remote.speed = newer.speed;
+                remote.mass = newer.mass || 0;
 
                 // ---- Rebuild the body locally with the follower chain ----
 
