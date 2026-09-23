@@ -1263,14 +1263,35 @@
                 }
             });
 
-                        // ---- Remote player collisions (same rules as AI) ----
+                                    // ---- Remote player collisions (same rules as AI) ----
             for (const remote of remoteSnakes.values()) {
                 if (!remote.isAlive) continue;
                 if (!remote.segments || remote.segments.length < 2) continue;
 
-                // Cull against our bounding box
-                if (remote.x < pbMinX || remote.x > pbMaxX) continue;
-                if (remote.y < pbMinY || remote.y > pbMaxY) continue;
+                // Compute the remote's own bounding box from its SEGMENTS,
+                // not just its head. This is the actual fix — the old code
+                // only checked the remote's head, so you could pass through
+                // a long remote body when their head was far away.
+                let rMinX = Infinity, rMaxX = -Infinity;
+                let rMinY = Infinity, rMaxY = -Infinity;
+                const sampleStep = Math.max(1, Math.floor(remote.segments.length / 12));
+                for (let i = 0; i < remote.segments.length; i += sampleStep) {
+                    const s = remote.segments[i];
+                    if (s.x < rMinX) rMinX = s.x;
+                    if (s.x > rMaxX) rMaxX = s.x;
+                    if (s.y < rMinY) rMinY = s.y;
+                    if (s.y > rMaxY) rMaxY = s.y;
+                }
+                // Always include the tail (it's often the furthest point)
+                const lastSeg = remote.segments[remote.segments.length - 1];
+                if (lastSeg.x < rMinX) rMinX = lastSeg.x;
+                if (lastSeg.x > rMaxX) rMaxX = lastSeg.x;
+                if (lastSeg.y < rMinY) rMinY = lastSeg.y;
+                if (lastSeg.y > rMaxY) rMaxY = lastSeg.y;
+
+                // Cull: only skip if the two bounding boxes don't overlap
+                if (rMaxX < pbMinX || rMinX > pbMaxX) continue;
+                if (rMaxY < pbMinY || rMinY > pbMaxY) continue;
 
                 const remoteSpine = getSpinePoints(remote);
 
