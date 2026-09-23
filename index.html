@@ -785,7 +785,7 @@
 
         // ========== GAME CONSTANTS ==========
         const FOOD_COUNT = 1500;
-        const AI_COUNT = 0;
+        const AI_COUNT = 500;
                 const WORLD_SIZE = { width: 8000, height: 8000 };
         const ARENA_CENTER_X = WORLD_SIZE.width / 2;
         const ARENA_CENTER_Y = WORLD_SIZE.height / 2;
@@ -1649,7 +1649,7 @@
                 }
             }
                                                 // ---- REMOTE SNAKE PLAYBACK + LOCAL PHYSICS ----
-            const RENDER_DELAY_MS = 180;
+            const RENDER_DELAY_MS = 220;
             const playbackTime = performance.now() - RENDER_DELAY_MS;
 
             for (const remote of remoteSnakes.values()) {
