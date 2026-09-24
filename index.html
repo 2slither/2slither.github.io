@@ -785,7 +785,7 @@
 
         // ========== GAME CONSTANTS ==========
         const FOOD_COUNT = 1500;
-        const AI_COUNT = 85;
+        const AI_COUNT = 30;
                 const WORLD_SIZE = { width: 8000, height: 8000 };
         const ARENA_CENTER_X = WORLD_SIZE.width / 2;
         const ARENA_CENTER_Y = WORLD_SIZE.height / 2;
@@ -1697,12 +1697,20 @@ function updateRemoteSnakePhysics(remote, playbackTime) {
                 // --- Turn rate derived from a minimum turn radius ---
                 // Radius grows with body size AND length, so the circle you
                 // trace visibly expands as you eat. turn = speed / radius.
-                                                const bodyRadius = playerSnake.targetSize;
-                // Lower base = snappier small snake. Slower growth = big circles
-                // take real time to earn.
-                const safetyFactor = 2 + Math.min(playerSnake.length / 3000, 4.4);
-                const minTurnRadius = bodyRadius * safetyFactor;
-                const maxTurnRate = 0.15;
+                                                               const bodyRadius = playerSnake.targetSize;
+                // Stay exactly as agile as a fresh spawn until length 3000.
+                // Past that, ramp hard from 2.0 → 9.0 over the next 7000 length.
+                const LEN_FLOOR = 3000;
+                const LEN_SPAN  = 7000;
+                const START_SF  = 2.0;
+                const MAX_SF    = 9.0;
+                const safetyFactor = START_SF + Math.max(0,
+                    Math.min(
+                        ((playerSnake.length - LEN_FLOOR) / LEN_SPAN) * (MAX_SF - START_SF),
+                        MAX_SF - START_SF
+                    )
+                );
+                const minTurnRadius = bodyRadius * safetyFactor;                const maxTurnRate = 0.15;
                 const turnSpeed = Math.min(maxTurnRate, playerSnake.speed / minTurnRadius);;
 
                 let angleDiff = ((desiredAngle - playerSnake.direction + Math.PI * 3) % (Math.PI * 2)) - Math.PI;
