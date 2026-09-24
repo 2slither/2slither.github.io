@@ -2012,11 +2012,13 @@ function updateRemoteSnakePhysics(remote, playbackTime) {
                     if (Math.sqrt(dx * dx + dy * dy) < playerSnake.size + food.size) {
                         foodParticles.splice(i, 1);
 
-                        // Diminishing returns: food is stronger when you're small
-                        const lengthEffect = food.lengthGain / (1 + playerSnake.length / 800);
-                        playerSnake.length += lengthEffect;
-
-                        // Fatness grows slowly and caps firmly
+                                                                        // Diminishing returns: food is much weaker as you grow.
+                        // Cap scales with the pellet's own value, so a normal
+                        // pellet (gain 2) caps at 1.0 and a death pellet
+                        // (gain 10) caps at 5.0 — death food stays a jackpot,
+                        // just not an instant-inflate one.
+                        const lengthEffect = food.lengthGain / (1 + playerSnake.length / 250);
+                        playerSnake.length += Math.min(lengthEffect, food.lengthGain * 0.5);                        // Fatness grows slowly and caps firmly
                         const MAX_TARGET_SIZE = 40;
                         if (playerSnake.targetSize < MAX_TARGET_SIZE) {
                             playerSnake.targetSize = Math.min(
