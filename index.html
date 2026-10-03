@@ -1654,483 +1654,170 @@ window.addEventListener('keyup', (e) => {
         }
 
         function update() {
-            if (!gameStarted) return;
-            gameTime++;
+    if (!gameStarted) return;
+    gameTime++;
 
-            checkCollisions();
-
-            // ---- PLAYER SNAKE ----
-            if (playerSnake.isAlive) {
-                const now = performance.now();
-                let laggedInput = null;
-                while (mouseBuffer.length && now - mouseBuffer[0].time >= INPUT_LAG_MS) {
-                    laggedInput = mouseBuffer.shift();
-                }
-                if (laggedInput) {
-                    mouseDirection = laggedInput.direction;
-                    mouseDistance = laggedInput.distance;
-                }
-
-                const rawDesired = mouseDirection;
-
-                if (lastRawDesired === null) {
-                    lastRawDesired = rawDesired;
-                    accumulatedDesired = rawDesired;
-                }
-
-                const rawDelta = Math.atan2(
-                    Math.sin(rawDesired - lastRawDesired),
-                    Math.cos(rawDesired - lastRawDesired)
-                );
-
-                accumulatedDesired += rawDelta;
-
-                const correction = Math.atan2(
-                    Math.sin(rawDesired - accumulatedDesired),
-                    Math.cos(rawDesired - accumulatedDesired)
-                );
-                accumulatedDesired += correction * 0.06;
-
-                lastRawDesired = rawDesired;
-
-                const desiredAngle = accumulatedDesired;
-
-                                // --- Boost & speed first (turn-rate math needs speed) ---
-                let canBoost = isBoosting && playerSnake.length > 10;
-                if (canBoost) {
-                    playerSnake.boostAccumulator += 0.03;
-                    while (playerSnake.boostAccumulator >= 1 && playerSnake.length > 10) {
-                        playerSnake.length -= 1;
-                        playerSnake.boostAccumulator -= 1;
-                    }
-                    if (playerSnake.length <= 10) {
-                        playerSnake.length = 10;
-                        canBoost = false;
-                    }
-                }
-
-                                // Ramp current speed toward target over BOOST_RAMP_MS milliseconds
-                                // Ramp current speed toward target over BOOST_RAMP_MS milliseconds
-                const boostNow = performance.now();
-                const dt = Math.min(boostNow - lastFrameTime, 50);
-                lastFrameTime = boostNow;
-
-                const targetSpeed = canBoost ? playerSnake.boostSpeed : playerSnake.speed;
-                const speedRange = playerSnake.boostSpeed - playerSnake.speed;
-                const maxChange = speedRange * (dt / BOOST_RAMP_MS);
-
-                if (currentSpeed < targetSpeed) {
-                    currentSpeed = Math.min(targetSpeed, currentSpeed + maxChange);
-                } else if (currentSpeed > targetSpeed) {
-                    currentSpeed = Math.max(targetSpeed, currentSpeed - maxChange);
-                }
-
-                boostRamp = speedRange > 0
-                    ? Math.max(0, Math.min(1, (currentSpeed - playerSnake.speed) / speedRange))
-                    : 0;
-                playerSnake.boostRamp = boostRamp;
-
-                const speed = currentSpeed;
-                bandScroll += speed * 0.15;
-
-                // --- Turn rate derived from a minimum turn radius ---
-                // Radius grows with body size AND length, so the circle you
-                // trace visibly expands as you eat. turn = speed / radius.
-                                                               const bodyRadius = playerSnake.targetSize;
-                // Stay exactly as agile as a fresh spawn until length 3000.
-                // Past that, ramp hard from 2.0 → 9.0 over the next 7000 length.
-                const LEN_FLOOR = 3000;
-                const LEN_SPAN  = 7000;
-                const START_SF  = 2.0;
-                const MAX_SF    = 9.0;
-                const safetyFactor = START_SF + Math.max(0,
-                    Math.min(
-                        ((playerSnake.length - LEN_FLOOR) / LEN_SPAN) * (MAX_SF - START_SF),
-                        MAX_SF - START_SF
-                    )
-                );
-                const minTurnRadius = bodyRadius * safetyFactor;                const maxTurnRate = 0.15;
-                const turnSpeed = Math.min(maxTurnRate, playerSnake.speed / minTurnRadius);;
-
-                let angleDiff = ((desiredAngle - playerSnake.direction + Math.PI * 3) % (Math.PI * 2)) - Math.PI;
-                if (Math.abs(angleDiff) > turnSpeed) {
-                    angleDiff = Math.sign(angleDiff) * turnSpeed;
-                }
-                playerSnake.direction += angleDiff;8
-
-                playerSnake.x += Math.cos(playerSnake.direction) * speed;
-                playerSnake.y += Math.sin(playerSnake.direction) * speed;
-
-                                // ---- LASER BOUNDARY: head out = instant death ----
-                const headDx = playerSnake.x - ARENA_CENTER_X;
-                const headDy = playerSnake.y - ARENA_CENTER_Y;
-                const headDistSq = headDx * headDx + headDy * headDy;
-
-                               if (headDistSq > ARENA_RADIUS * ARENA_RADIUS) {
-                    killSnake(playerSnake);
-                } else {
-                    updateSegments(playerSnake, SEGMENT_SPACING);
-
-                    playerSnake.mass = calculateSnakeMass(playerSnake);
-                    mass = Math.floor(playerSnake.mass);
-                    score = Math.floor(playerSnake.mass / 10);
-                    document.getElementById('score').textContent = score;
-                    document.getElementById('mass').textContent = `${Math.floor(playerSnake.length)} length`;
-
-                    // ---- MULTIPLAYER: broadcast our snake ----
-                                        // ---- MULTIPLAYER: broadcast our snake (real-time based) ----
-                    const sendNow = performance.now();
-                    if (mpSocket && mpSocket.readyState === 1 &&
-                        sendNow - mpLastSendTime >= MP_SEND_INTERVAL_MS) {
-                        mpLastSendTime = sendNow;
-                        {
-                            mpSocket.send(JSON.stringify({
-                                type: 'update',
-                                x: Math.round(playerSnake.x * 10) / 10,
-                                y: Math.round(playerSnake.y * 10) / 10,
-                                dir: Math.round(playerSnake.direction * 1000) / 1000,
-                                speed: Math.round(currentSpeed * 100) / 100,
-                                targetSize: Math.round(playerSnake.targetSize * 100) / 100,
-                                length: Math.floor(playerSnake.length),
-                                mass: Math.round(playerSnake.mass),
-                                boost: currentSpeed > playerSnake.speed * 1.05,
-                                hue: savedHue,
-                                name: playerSnake.name
-                            }));
-                        }
-                    }
-                }
+    // ---- SEND INPUT TO SERVER ----
+    if (mpSocket && mpSocket.readyState === 1 && playerSnake.isAlive) {
+        const sendNow = performance.now();
+        if (sendNow - mpLastSendTime >= MP_SEND_INTERVAL_MS) {
+            mpLastSendTime = sendNow;
+            const now2 = performance.now();
+            let laggedInput = null;
+            while (mouseBuffer.length && now2 - mouseBuffer[0].time >= INPUT_LAG_MS) {
+                laggedInput = mouseBuffer.shift();
             }
-                                                // ---- REMOTE SNAKE PLAYBACK + LOCAL PHYSICS ----
-            const RENDER_DELAY_MS = 220;
-            const playbackTime = performance.now() - RENDER_DELAY_MS;
-
-            for (const remote of remoteSnakes.values()) {
-                const snaps = remote.snapshots;
-                if (!snaps || snaps.length === 0) continue;
-
-                // ---- Interpolate the head + direction from buffered snapshots ----
-                let older = null, newer = null;
-                for (let i = 0; i < snaps.length - 1; i++) {
-                    if (snaps[i].time <= playbackTime && snaps[i + 1].time >= playbackTime) {
-                        older = snaps[i];
-                        newer = snaps[i + 1];
-                        break;
-                    }
-                }
-                                                let t;
-                const lastIdx = snaps.length - 1;
-
-                if (playbackTime <= snaps[0].time) {
-                    // Buffer hasn't caught up yet — hold on oldest pose,
-                    // but keep advancing t slightly so we don't freeze.
-                    older = snaps[0];
-                    newer = snaps.length > 1 ? snaps[1] : snaps[0];
-                    t = 0;
-                } else if (playbackTime >= snaps[lastIdx].time) {
-                    // We're ahead of the buffer — the network is late.
-                    // Extrapolate past the newest snapshot so the remote
-                    // keeps moving smoothly instead of freezing.
-                    if (snaps.length > 1) {
-                        older = snaps[lastIdx - 1];
-                        newer = snaps[lastIdx];
-                        const span = Math.max(1, newer.time - older.time);
-                        // Allow t to exceed 1 by up to +0.3 seconds' worth of
-                        // extrapolation. Beyond that, clamp to avoid flying
-                        // off in a random direction.
-                        const extra = (playbackTime - newer.time) / span;
-                        t = 1 + Math.min(extra, 0.3);
-                    } else {
-                        older = newer = snaps[lastIdx];
-                        t = 1;
-                    }
-                } else {
-                    // Normal case — playbackTime is inside the buffer.
-                    older = snaps[0];
-                    newer = snaps[lastIdx];
-                    for (let i = 0; i < lastIdx; i++) {
-                        if (snaps[i].time <= playbackTime && snaps[i + 1].time >= playbackTime) {
-                            older = snaps[i];
-                            newer = snaps[i + 1];
-                            break;
-                        }
-                    }
-                    const span = Math.max(1, newer.time - older.time);
-                    t = (playbackTime - older.time) / span;
-                    t = Math.max(0, Math.min(1.5, t));   // allow slight overshoot
-                }
-                remote.x = older.x + (newer.x - older.x) * t;
-                remote.y = older.y + (newer.y - older.y) * t;
-
-                let dDiff = ((newer.dir - older.dir + Math.PI * 3) % (Math.PI * 2)) - Math.PI;
-                remote.direction = older.dir + dDiff * t;
-
-                remote.targetSize = older.targetSize + (newer.targetSize - older.targetSize) * t;
-                remote.length = newer.length;
-                remote.speed = newer.speed;
-                remote.mass = newer.mass || 0;
-
-                // ---- Rebuild the body locally with the follower chain ----
-
-                // First-time init: stack segments on the head
-                if (!remote.segments || remote.segments.length === 0) {
-                    remote.segments = [];
-                    for (let i = 0; i < remote.length; i++) {
-                        remote.segments.push({
-                            x: remote.x, y: remote.y,
-                            size: remote.targetSize
-                        });
-                    }
-                }
-
-                // Move the head
-                remote.segments[0].x = remote.x;
-                remote.segments[0].y = remote.y;
-
-                // Grow / shrink to match reported length
-                while (remote.segments.length < remote.length) {
-                    const tail = remote.segments[remote.segments.length - 1];
-                    remote.segments.push({ x: tail.x, y: tail.y, size: tail.size });
-                }
-                while (remote.segments.length > remote.length) {
-                    remote.segments.pop();
-                }
-
-                // Follower chain — same math as updateSegments()
-                for (let i = 1; i < remote.segments.length; i++) {
-                    const prev = remote.segments[i - 1];
-                    const seg = remote.segments[i];
-                    const dx = prev.x - seg.x;
-                    const dy = prev.y - seg.y;
-                    const dist = Math.sqrt(dx * dx + dy * dy);
-                    if (dist > SEGMENT_SPACING) {
-                        const tt = (dist - SEGMENT_SPACING) / dist;
-                        seg.x += dx * tt;
-                        seg.y += dy * tt;
-                    }
-                }
-
-                // Smooth segment sizes to match target
-                for (let i = 0; i < remote.segments.length; i++) {
-                    const seg = remote.segments[i];
-                    seg.size += (remote.targetSize - seg.size) * 0.1;
-                }
+            if (laggedInput) {
+                mouseDirection = laggedInput.direction;
+                mouseDistance = laggedInput.distance;
             }
-
-                        // ---- AI SNAKES ----
-                        // ---- AI SNAKES ----
-            const aiHash = buildAIHash();
-
-            aiSnakes.forEach(snake => {
-                if (!snake.isAlive) return;
-
-                snake.targetChangeTimer--;
-
-                if (snake.targetChangeTimer <= 0) {
-                    if (snake.behavior === 0 || Math.random() < 0.3) {
-                        snake.targetDirection = Math.random() * Math.PI * 2;
-                        snake.targetChangeTimer = 30 + Math.random() * 90;
-                    } else if (snake.behavior === 1 && foodParticles.length > 0) {
-                        let closestFood = null, closestDist = Infinity;
-                        for (let i = 0; i < Math.min(20, foodParticles.length); i++) {
-                            const food = foodParticles[Math.floor(Math.random() * foodParticles.length)];
-                            const dx = food.x - snake.x, dy = food.y - snake.y;
-                            const dist = dx * dx + dy * dy;
-                            if (dist < closestDist) { closestDist = dist; closestFood = food; }
-                        }
-                        if (closestFood) {
-                            snake.targetDirection = Math.atan2(closestFood.y - snake.y, closestFood.x - snake.x);
-                            snake.targetChangeTimer = 10 + Math.random() * 30;
-                        }
-                    } else if (snake.behavior === 2 && aiSnakes.length > 1) {
-                        let targetSnake = null, closestDist = Infinity;
-                        for (const other of aiSnakes) {
-                            if (other === snake || !other.isAlive) continue;
-                            const dx = other.x - snake.x, dy = other.y - snake.y;
-                            const dist = dx * dx + dy * dy;
-                            if (dist < closestDist && dist > 100) { closestDist = dist; targetSnake = other; }
-                        }
-                        if (targetSnake) {
-                            snake.targetDirection = Math.atan2(targetSnake.y - snake.y, targetSnake.x - snake.x);
-                            snake.targetChangeTimer = 30 + Math.random() * 60;
-                        }
-                    }
-                }
-
-                let aiAngleDiff = ((snake.targetDirection - snake.direction + Math.PI * 3) % (Math.PI * 2)) - Math.PI;
-                const aiTurnSpeed = 0.08;
-                if (Math.abs(aiAngleDiff) > aiTurnSpeed) {
-                    aiAngleDiff = Math.sign(aiAngleDiff) * aiTurnSpeed;
-                }
-                snake.direction += aiAngleDiff;
-
-                snake.x += Math.cos(snake.direction) * snake.speed;
-                snake.y += Math.sin(snake.direction) * snake.speed;
-
-                                // ---- LASER BOUNDARY ----
-                const aiDx = snake.x - ARENA_CENTER_X;
-                const aiDy = snake.y - ARENA_CENTER_Y;
-                if (aiDx * aiDx + aiDy * aiDy > ARENA_RADIUS * ARENA_RADIUS) {
-                    killSnake(snake);
-                    return;   // skip the rest of this AI's update
-                }
-
-                snake.growthTimer++;
-                if (snake.growthTimer >= AI_GROWTH_INTERVAL && snake.length < MAX_AI_LENGTH) {
-                    snake.length += 1;
-                    snake.targetSize += 0.05;
-                    snake.growthTimer = 0;
-                }
-
-                updateSegments(snake, SEGMENT_SPACING);
-                snake.mass = calculateSnakeMass(snake);
-
-                // Self-collision: this AI's head vs other AI bodies
-                                // ---- AI-vs-AI self collision (with spawn grace) ----
-                if (snake.isAlive) {
-                    const grace = aiSpawnGrace.get(snake.id) || 0;
-                    if (grace > 0) {
-                        aiSpawnGrace.set(snake.id, grace - 1);
-                    } else {
-                        const headRadius = snake.segments[0].size * SPINE_RADIUS_SCALE;
-                        const nearby = getNearbyAIs(snake.x, snake.y, aiHash);
-                        for (let n = 0; n < nearby.length; n++) {
-                            const other = nearby[n];
-                            if (other === snake || !other.isAlive) continue;
-
-                            const segs = other.segments;
-                            const step = Math.max(1, Math.floor(segs.length / 20));
-                            let hit = false;
-                            for (let i = 1; i < segs.length; i += step) {
-                                const seg = segs[i];
-                                const dx = snake.x - seg.x;
-                                const dy = snake.y - seg.y;
-                                const minDist = headRadius + seg.size * SPINE_RADIUS_SCALE;
-                                if (dx * dx + dy * dy < minDist * minDist) {
-                                    hit = true;
-                                    break;
-                                }
-                            }
-                            if (hit) {
-                                killSnake(snake);
-                                break;
-                            }
-                        }
-                    }
-                }
-            });
-
-            // ---- AI RESPAWN (keeps world populated) ----
-                        // ---- AI RESPAWN (keeps world populated) ----
-            if (gameTime % 30 === 0) {
-                // Drop grace entries for dead snakes
-                const liveIds = new Set(aiSnakes.filter(s => s.isAlive).map(s => s.id));
-                for (const id of aiSpawnGrace.keys()) {
-                    if (!liveIds.has(id)) aiSpawnGrace.delete(id);
-                }
-
-                aiSnakes = aiSnakes.filter(s => s.isAlive);
-                while (aiSnakes.length < AI_COUNT) {
-                    aiSnakes.push(createAISnake());
-                }
-            }
-
-            // ---- PLAYER FOOD COLLISION ----
-            if (playerSnake.isAlive) {
-                const SUCTION_RADIUS = 140;
-                const SUCTION_STRENGTH = 0.22;
-                for (let i = 0; i < foodParticles.length; i++) {
-                    const food = foodParticles[i];
-                    const dx = playerSnake.x - food.x;
-                    const dy = playerSnake.y - food.y;
-                    const dist = Math.sqrt(dx * dx + dy * dy);
-                    if (dist < SUCTION_RADIUS && dist > 0.5) {
-                        const t = 1 - dist / SUCTION_RADIUS;
-                        const pull = t * t * SUCTION_RADIUS * SUCTION_STRENGTH;
-                        food.x += (dx / dist) * pull;
-                        food.y += (dy / dist) * pull;
-                    }
-                }
-
-                                for (let i = foodParticles.length - 1; i >= 0; i--) {
-                    const food = foodParticles[i];
-                    const dx = playerSnake.x - food.x;
-                    const dy = playerSnake.y - food.y;
-                    if (Math.sqrt(dx * dx + dy * dy) < playerSnake.size + food.size) {
-                        foodParticles.splice(i, 1);
-
-                                                                        // Diminishing returns: food is much weaker as you grow.
-                        // Cap scales with the pellet's own value, so a normal
-                        // pellet (gain 2) caps at 1.0 and a death pellet
-                        // (gain 10) caps at 5.0 — death food stays a jackpot,
-                        // just not an instant-inflate one.
-                        const lengthEffect = food.lengthGain / (1 + playerSnake.length / 250);
-                        playerSnake.length += Math.min(lengthEffect, food.lengthGain * 0.5);                        // Fatness grows slowly and caps firmly
-                        const MAX_TARGET_SIZE = 40;
-                        if (playerSnake.targetSize < MAX_TARGET_SIZE) {
-                            playerSnake.targetSize = Math.min(
-                                MAX_TARGET_SIZE,
-                                playerSnake.targetSize + lengthEffect * 0.025
-                            );
-                        }
-
-                        for (let j = 0; j < 5; j++) {
-                            particles.push({
-                                x: food.x, y: food.y,
-                                size: food.size * 0.5,
-                                color: food.color,
-                                life: 20 + Math.random() * 10,
-                                vx: (Math.random() - 0.5) * 2,
-                                vy: (Math.random() - 0.5) * 2
-                            });
-                        }
-                    }
-                }
-            }
-
-            if (foodParticles.length < FOOD_COUNT * 0.7 && gameTime % 30 === 0) {
-                const count = Math.min(5, FOOD_COUNT - foodParticles.length);
-                for (let i = 0; i < count; i++) {
-                    const pt = randomArenaPoint(20);
-                    foodParticles.push({
-                        x: pt.x,
-                        y: pt.y,
-                        size: 3 + Math.random() * 4,
-                        color: `hsl(${Math.random() * 360}, 100%, 50%)`,
-                        mass: 1,
-                        lengthGain: 2,
-                        wigSeed: Math.random() * Math.PI * 2,
-                        wigSpeed: 0.6 + Math.random() * 0.6
-                    });
-                }
-            }
-
-            for (let i = particles.length - 1; i >= 0; i--) {
-                const p = particles[i];
-                p.x += p.vx;
-                p.y += p.vy;
-                p.life--;
-                p.size *= 0.95;
-                if (p.life <= 0 || p.size < 0.1) particles.splice(i, 1);
-            }
-
-            // ---- CAMERA ----
-            if (playerSnake.isAlive) {
-                const viewW = canvas.width / zoom;
-                const viewH = canvas.height / zoom;
-
-                const targetCamX = playerSnake.x - viewW / 2;
-                const targetCamY = playerSnake.y - viewH / 2;
-
-                camera.x += (targetCamX - camera.x) * 0.12;
-                camera.y += (targetCamY - camera.y) * 0.12;
-
-                camera.x = Math.max(0, Math.min(WORLD_SIZE.width - viewW, camera.x));
-                camera.y = Math.max(0, Math.min(WORLD_SIZE.height - viewH, camera.y));
-            }
-
-            if (gameTime % 10 === 0) updateLeaderboard();
+            mpSocket.send(JSON.stringify({
+                type: 'input',
+                angle: mouseDirection
+            }));
         }
+    }
+
+    // ---- PLAYER PREDICTION ----
+    if (playerSnake.isAlive) {
+        const bodyRadius = playerSnake.targetSize;
+        const safetyFactor = START_SF + Math.max(0,
+            Math.min(
+                ((playerSnake.length - LEN_FLOOR) / LEN_SPAN) * (MAX_SF - START_SF),
+                MAX_SF - START_SF
+            )
+        );
+        const minTurnRadius = bodyRadius * safetyFactor;
+        const turnSpeed = Math.min(0.15, playerSnake.speed / minTurnRadius);
+
+        let angleDiff = ((mouseDirection - playerSnake.direction + Math.PI * 3) % (Math.PI * 2)) - Math.PI;
+        if (Math.abs(angleDiff) > turnSpeed) {
+            angleDiff = Math.sign(angleDiff) * turnSpeed;
+        }
+        playerSnake.direction += angleDiff;
+
+        playerSnake.x += Math.cos(playerSnake.direction) * playerSnake.speed;
+        playerSnake.y += Math.sin(playerSnake.direction) * playerSnake.speed;
+
+        updateSegments(playerSnake, SEGMENT_SPACING);
+        playerSnake.mass = calculateSnakeMass(playerSnake);
+        mass = Math.floor(playerSnake.mass);
+        score = Math.floor(playerSnake.mass / 10);
+        document.getElementById('score').textContent = score;
+        document.getElementById('mass').textContent = `${Math.floor(playerSnake.length)} length`;
+    }
+
+    // ---- REMOTE SNAKE PLAYBACK ----
+    const RENDER_DELAY_MS = 220;
+    const playbackTime = performance.now() - RENDER_DELAY_MS;
+
+    for (const remote of remoteSnakes.values()) {
+        const snaps = remote.snapshots;
+        if (!snaps || snaps.length === 0) continue;
+
+        let older = null, newer = null;
+        const lastIdx = snaps.length - 1;
+
+        if (playbackTime <= snaps[0].time) {
+            older = snaps[0];
+            newer = snaps.length > 1 ? snaps[1] : snaps[0];
+        } else if (playbackTime >= snaps[lastIdx].time) {
+            if (snaps.length > 1) {
+                older = snaps[lastIdx - 1];
+                newer = snaps[lastIdx];
+            } else {
+                older = newer = snaps[lastIdx];
+            }
+        } else {
+            older = snaps[0];
+            newer = snaps[lastIdx];
+            for (let i = 0; i < lastIdx; i++) {
+                if (snaps[i].time <= playbackTime && snaps[i + 1].time >= playbackTime) {
+                    older = snaps[i];
+                    newer = snaps[i + 1];
+                    break;
+                }
+            }
+        }
+
+        const span = Math.max(1, newer.time - older.time);
+        let t = (playbackTime - older.time) / span;
+        t = Math.max(0, Math.min(1.5, t));
+
+        remote.x = older.x + (newer.x - older.x) * t;
+        remote.y = older.y + (newer.y - older.y) * t;
+
+        let dDiff = ((newer.dir - older.dir + Math.PI * 3) % (Math.PI * 2)) - Math.PI;
+        remote.direction = older.dir + dDiff * t;
+
+        remote.targetSize = older.targetSize + (newer.targetSize - older.targetSize) * t;
+        remote.length = newer.length;
+        remote.mass = newer.mass || 0;
+
+        if (!remote.segments || remote.segments.length === 0) {
+            remote.segments = [];
+            for (let i = 0; i < remote.length; i++) {
+                remote.segments.push({
+                    x: remote.x, y: remote.y,
+                    size: remote.targetSize
+                });
+            }
+        }
+
+        remote.segments[0].x = remote.x;
+        remote.segments[0].y = remote.y;
+
+        while (remote.segments.length < remote.length) {
+            const tail = remote.segments[remote.segments.length - 1];
+            remote.segments.push({ x: tail.x, y: tail.y, size: tail.size });
+        }
+        while (remote.segments.length > remote.length) {
+            remote.segments.pop();
+        }
+
+        for (let i = 1; i < remote.segments.length; i++) {
+            const prev = remote.segments[i - 1];
+            const seg = remote.segments[i];
+            const dx = prev.x - seg.x;
+            const dy = prev.y - seg.y;
+            const dist = Math.sqrt(dx * dx + dy * dy);
+            if (dist > SEGMENT_SPACING) {
+                const tt = (dist - SEGMENT_SPACING) / dist;
+                seg.x += dx * tt;
+                seg.y += dy * tt;
+            }
+        }
+
+        for (let i = 0; i < remote.segments.length; i++) {
+            const seg = remote.segments[i];
+            seg.size += (remote.targetSize - seg.size) * 0.1;
+        }
+    }
+
+    // ---- PARTICLES ----
+    for (let i = particles.length - 1; i >= 0; i--) {
+        const p = particles[i];
+        p.x += p.vx;
+        p.y += p.vy;
+        p.life--;
+        p.size *= 0.95;
+        if (p.life <= 0 || p.size < 0.1) particles.splice(i, 1);
+    }
+
+    // ---- CAMERA ----
+    if (playerSnake.isAlive) {
+        const viewW = canvas.width / zoom;
+        const viewH = canvas.height / zoom;
+        const targetCamX = playerSnake.x - viewW / 2;
+        const targetCamY = playerSnake.y - viewH / 2;
+        camera.x += (targetCamX - camera.x) * 0.12;
+        camera.y += (targetCamY - camera.y) * 0.12;
+        camera.x = Math.max(0, Math.min(WORLD_SIZE.width - viewW, camera.x));
+        camera.y = Math.max(0, Math.min(WORLD_SIZE.height - viewH, camera.y));
+    }
+
+    if (gameTime % 10 === 0) updateLeaderboard();
+}
 
         function render() {
             // Dark background
