@@ -815,8 +815,8 @@
         let gameTime = 0;
         let score = 0;
         let mass = 0;
-        let foodParticles = [];
-        let aiSnakes = [];
+        let serverFood = [];        // food list from server
+        let aiSnakes = [];          // kept for safety, always empty
         let particles = [];
         let camera = { x: 0, y: 0 };
         let isBoosting = false;
@@ -935,55 +935,63 @@
 
         // ========== GAME FUNCTIONS ==========
         function initGame() {
-            gameTime = 0;
-            score = 0;
-            mass = 0;
-            foodParticles = [];
-            aiSnakes = [];
-            particles = [];
-            camera = { x: 0, y: 0 };
-            lastRawDesired = null;
-            accumulatedDesired = 0;
-            mouseBuffer = [];
-            zoom = 1;
+    gameTime = 0;
+    score = 0;
+    mass = 0;
+    serverFood = [];
+    aiSnakes = [];
+    particles = [];
+    remoteSnakes.clear();
+    camera = { x: 0, y: 0 };
+    lastRawDesired = null;
+    accumulatedDesired = 0;
+    mouseBuffer = [];
+    zoom = 1;
 
-            const nameInput = document.getElementById('name-input');
-            const enteredName = nameInput ? nameInput.value.trim() : '';
-            playerSnake.name = enteredName ? enteredName.slice(0, 48) : 'Player';
-            playerSnake.segments = [];
-            cosmeticAngleInit = false;
-            playerSnake.color = `hsl(${savedHue}, 100%, 50%)`;
-            playerSnake.direction = Math.random() * Math.PI * 2;
-            const spawnPt = randomArenaPoint(400);
-            playerSnake.x = spawnPt.x;
-            playerSnake.y = spawnPt.y;
-            playerSnake.isAlive = true;
-            playerSnake.boostFuel = 100;
-            playerSnake.boostAccumulator = 0;
-            boostRamp = 0;
-            currentSpeed = playerSnake.speed;
-            lastFrameTime = performance.now();
-            playerSnake.length = 10;
-            playerSnake.targetSize = 16;
-            playerSnake.mass = 0;
+    const nameInput = document.getElementById('name-input');
+    const enteredName = nameInput ? nameInput.value.trim() : '';
+    playerSnake.name = enteredName ? enteredName.slice(0, 48) : 'Player';
+    playerSnake.segments = [];
+    cosmeticAngleInit = false;
+    playerSnake.color = `hsl(${savedHue}, 100%, 50%)`;
+    playerSnake.direction = Math.random() * Math.PI * 2;
 
-            for (let i = 0; i < playerSnake.length; i++) {
-                playerSnake.segments.push({
-                    x: playerSnake.x,
-                    y: playerSnake.y,
-                    size: playerSnake.size
-                });
-            }
+    // Spawn at world center until the server tells us where we are
+    playerSnake.x = ARENA_CENTER_X;
+    playerSnake.y = ARENA_CENTER_Y;
+    playerSnake.isAlive = true;
+    playerSnake.boostFuel = 100;
+    playerSnake.boostAccumulator = 0;
+    boostRamp = 0;
+    currentSpeed = playerSnake.speed;
+    lastFrameTime = performance.now();
+    playerSnake.length = 10;
+    playerSnake.targetSize = 16;
+    playerSnake.mass = 0;
 
-            createFood();
-            for (let i = 0; i < AI_COUNT; i++) aiSnakes.push(createAISnake());
+    for (let i = 0; i < playerSnake.length; i++) {
+        playerSnake.segments.push({
+            x: playerSnake.x,
+            y: playerSnake.y,
+            size: playerSnake.size
+        });
+    }
 
-            camera.x = playerSnake.x - canvas.width / 2;
-            camera.y = playerSnake.y - canvas.height / 2;
+    // No local food or AI spawning — the server sends those.
+    // Reconnect the multiplayer socket (if already connected, close first).
+    if (mpSocket && mpSocket.readyState === 1) {
+        try { mpSocket.close(); } catch (e) {}
+    }
+    mpConnected = false;
+    mpId = null;
+    initMultiplayer();
 
-            if (animationFrameId) cancelAnimationFrame(animationFrameId);
-            gameLoop();
-        }
+    camera.x = playerSnake.x - canvas.width / 2;
+    camera.y = playerSnake.y - canvas.height / 2;
+
+    if (animationFrameId) cancelAnimationFrame(animationFrameId);
+    gameLoop();
+}
 
         function createFood() {
             for (let i = 0; i < FOOD_COUNT; i++) {
@@ -1565,8 +1573,18 @@ function updateRemoteSnakePhysics(remote, playbackTime) {
                 zoom = Math.max(0.35, Math.min(3, zoom));
             }, { passive: false });
 
-            canvas.addEventListener('mousedown', () => { isBoosting = true; });
-            canvas.addEventListener('mouseup', () => { isBoosting = false; });
+            canvas.addEventListener('mousedown', () => {
+    isBoosting = true;
+    if (mpSocket && mpSocket.readyState === 1) {
+        mpSocket.send(JSON.stringify({ type: 'boost', on: true }));
+    }
+});
+canvas.addEventListener('mouseup', () => {
+    isBoosting = false;
+    if (mpSocket && mpSocket.readyState === 1) {
+        mpSocket.send(JSON.stringify({ type: 'boost', on: false }));
+    }
+});
 
             canvas.addEventListener('touchmove', (e) => {
                 e.preventDefault();
@@ -1582,17 +1600,38 @@ function updateRemoteSnakePhysics(remote, playbackTime) {
                 });
             }, { passive: false });
 
-            canvas.addEventListener('touchstart', (e) => { e.preventDefault(); isBoosting = true; }, { passive: false });
-            canvas.addEventListener('touchend', (e) => { e.preventDefault(); isBoosting = false; }, { passive: false });
-
-            window.addEventListener('keydown', (e) => {
-                if (e.key === ' ' || e.key === 'Spacebar') isBoosting = true;
-                if (e.key === 'h' || e.key === 'H') debugSpine = true;
-            });
-            window.addEventListener('keyup', (e) => {
-                if (e.key === ' ' || e.key === 'Spacebar') isBoosting = false;
-                if (e.key === 'h' || e.key === 'H') debugSpine = false;
-            });
+            canvas.addEventListener('touchstart', (e) => {
+    e.preventDefault();
+    isBoosting = true;
+    if (mpSocket && mpSocket.readyState === 1) {
+        mpSocket.send(JSON.stringify({ type: 'boost', on: true }));
+    }
+}, { passive: false });
+canvas.addEventListener('touchend', (e) => {
+    e.preventDefault();
+    isBoosting = false;
+    if (mpSocket && mpSocket.readyState === 1) {
+        mpSocket.send(JSON.stringify({ type: 'boost', on: false }));
+    }
+}, { passive: false });
+           window.addEventListener('keydown', (e) => {
+    if (e.key === ' ' || e.key === 'Spacebar') {
+        if (!isBoosting && mpSocket && mpSocket.readyState === 1) {
+            mpSocket.send(JSON.stringify({ type: 'boost', on: true }));
+        }
+        isBoosting = true;
+    }
+    if (e.key === 'h' || e.key === 'H') debugSpine = true;
+});
+window.addEventListener('keyup', (e) => {
+    if (e.key === ' ' || e.key === 'Spacebar') {
+        isBoosting = false;
+        if (mpSocket && mpSocket.readyState === 1) {
+            mpSocket.send(JSON.stringify({ type: 'boost', on: false }));
+        }
+    }
+    if (e.key === 'h' || e.key === 'H') debugSpine = false;
+});
 
             document.getElementById('start-button').addEventListener('click', () => {
                 gameStarted = true;
@@ -2170,7 +2209,7 @@ function updateRemoteSnakePhysics(remote, playbackTime) {
             
                         // ---- FOOD (with wiggle + pulsing glow) ----
             const tWig = gameTime * 0.08;
-            foodParticles.forEach(food => {
+            serverFood.forEach(food => {
                 if (food.x < camera.x - 50 || food.x > camera.x + viewW + 50) return;
                 if (food.y < camera.y - 50 || food.y > camera.y + viewH + 50) return;
 
@@ -2188,10 +2227,11 @@ function updateRemoteSnakePhysics(remote, playbackTime) {
                 const pulse = 1 + Math.sin(tWig * ws * 1.4 + seed) * 0.12;
                 const glowD = food.size * 6 * pulse;
 
-                const glow = getGlowSprite(food.color);
+                const foodColor = food.color || `hsl(${food.hue || 0}, 100%, 50%)`;
+                const glow = getGlowSprite(foodColor);
                 ctx.drawImage(glow, dx - glowD / 2, dy - glowD / 2, glowD, glowD);
 
-                ctx.fillStyle = food.color;
+                ctx.fillStyle = foodColor;
                 ctx.beginPath(); ctx.arc(dx, dy, food.size, 0, Math.PI * 2); ctx.fill();
             });
 
@@ -3037,165 +3077,154 @@ function updateRemoteSnakePhysics(remote, playbackTime) {
             ctx.restore();
         }
 
-                // ========== MULTIPLAYER (Phase 1) ==========
-        let mpSocket = null;
-        let mpId = null;
-        const remoteSnakes = new Map();
-        let mpLastSendTime = 0;
-        const MP_SEND_INTERVAL_MS = 33;   // 30 Hz by wall clock
-        let mpStatus = 'connecting';
+// ========== MULTIPLAYER (Phase 2 — server-authoritative) ==========
+let mpSocket = null;
+let mpId = null;
+let mpConnected = false;
+let mpLastSendTime = 0;
+const MP_SEND_INTERVAL_MS = 33;
 
-        function initMultiplayer() {
-            try {
-                mpSocket = new WebSocket('wss://2slither.duckdns.org/ws');
+function initMultiplayer() {
+    try {
+        mpSocket = new WebSocket('wss://2slither.duckdns.org/ws');
 
-                mpSocket.addEventListener('open', () => {
-                    mpStatus = 'connected';
-                    console.log('[MP] connected');
-                });
+        mpSocket.addEventListener('open', () => {
+            mpConnected = true;
+            mpSocket.send(JSON.stringify({
+                type: 'join',
+                name: playerSnake.name,
+                hue: savedHue
+            }));
+            console.log('[MP] connected');
+        });
 
-                mpSocket.addEventListener('close', () => {
-                    mpStatus = 'disconnected';
-                    console.log('[MP] closed');
-                });
+        mpSocket.addEventListener('close', () => {
+            mpConnected = false;
+            console.log('[MP] closed');
+        });
 
-                mpSocket.addEventListener('error', () => {
-                    mpStatus = 'error';
-                    console.log('[MP] error');
-                });
+        mpSocket.addEventListener('error', () => {
+            console.log('[MP] error');
+        });
 
-                mpSocket.addEventListener('message', (e) => {
-                    let msg;
-                    try { msg = JSON.parse(e.data); } catch (err) { return; }
+        mpSocket.addEventListener('message', (e) => {
+            let msg;
+            try { msg = JSON.parse(e.data); } catch (err) { return; }
 
-                    if (msg.type === 'welcome') {
-                        mpId = msg.id;
-                                                                                } else if (msg.type === 'snakes') {
-                        const now = performance.now();
-                        const seen = new Set();
-
-                                                for (const s of msg.snakes) {
-                            if (s.id === mpId) continue;
-                            if (s.x == null) continue;
-                            seen.add(s.id);
-
-                        let remote = remoteSnakes.get(s.id);
-                            if (!remote) {
-                                remote = {
-                                    id: s.id,
-                                    name: s.name,
-                                    color: `hsl(${s.hue}, 100%, 50%)`,
-                                    size: s.targetSize,
-                                    targetSize: s.targetSize,
-                                    length: s.length,
-                                    mass: s.mass || 0,
-                                    boostRamp: 0,
-                                    x: s.x,
-                                    y: s.y,
-                                    direction: s.dir,
-                                    isAlive: true,
-                                    snapshots: [],
-                                    segments: [],
-                                    // New properties for local prediction & smoothing
-                                    vx: 0,
-                                    vy: 0,
-                                    lastX: undefined,
-                                    lastY: undefined
-                                };
-                                remoteSnakes.set(s.id, remote);
-                            }
-
-                            // Monotonic arrival timestamps: even if two packets
-                            // arrive in the same millisecond, give the second
-                            // one a strictly greater time so interpolation has
-                            // a real span to work with.
-                            const lastT = remote.snapshots.length
-                                ? remote.snapshots[remote.snapshots.length - 1].time
-                                : 0;
-                            const pushT = Math.max(now, lastT + 1);
-
-                            remote.snapshots.push({
-                                time: pushT,
-                                x: s.x,
-                                y: s.y,
-                                dir: s.dir,
-                                speed: s.speed,
-                                targetSize: s.targetSize,
-                                length: s.length,
-                                mass: s.mass || 0,
-                                boost: !!s.boost
-                            });
-
-                            // Smoothly ramp boost for the glow effect
-                            const targetBoost = s.boost ? 1 : 0;
-                            remote.boostRamp = remote.boostRamp + (targetBoost - remote.boostRamp) * 0.25;
-
-                            while (remote.snapshots.length > 0 &&
-                                   now - remote.snapshots[0].time > 1500) {
-                                remote.snapshots.shift();
-                            }
-                        }
-
-                        for (const id of [...remoteSnakes.keys()]) {
-                            if (!seen.has(id)) remoteSnakes.delete(id);
-                        }
-                    } else if (msg.type === 'death' && msg.id !== mpId) {
-                        const remote = remoteSnakes.get(msg.id);
-
-                        // Use the segments sent with the death message — that's
-                        // the exact world position, so food spawns where the
-                        // survivor actually saw the snake, not a stale copy.
-                        const deadSegments = msg.segments || (remote && remote.segments) || [];
-                        const deadColor = msg.color || (remote && remote.color) || 'hsl(280,100%,50%)';
-
-                        for (let i = 0; i < deadSegments.length; i++) {
-                            const seg = deadSegments[i];
-
-                            // Skip segments off-screen — no point spawning
-                            // food the survivor can't see anyway (they'll
-                            // respawn / reconnect)
-                            const dx = seg.x - camera.x;
-                            const dy = seg.y - camera.y;
-                            const vw = canvas.width / zoom;
-                            const vh = canvas.height / zoom;
-                            if (dx < -200 || dx > vw + 200) continue;
-                            if (dy < -200 || dy > vh + 200) continue;
-
-                            // Death pellet
-                            foodParticles.push({
-                                x: seg.x + (Math.random() - 0.5) * seg.size * 0.35,
-                                y: seg.y + (Math.random() - 0.5) * seg.size * 0.35,
-                                size: seg.size * 1.15,
-                                color: deadColor,
-                                mass: 10,
-                                lengthGain: 10,
-                                wigSeed: Math.random() * Math.PI * 2,
-                                wigSpeed: 0.6 + Math.random() * 0.6
-                            });
-
-                            // A few sparks for visual feedback
-                            for (let k = 0; k < 2; k++) {
-                                particles.push({
-                                    x: seg.x, y: seg.y,
-                                    size: seg.size * 0.5,
-                                    color: deadColor,
-                                    life: 30 + Math.random() * 20,
-                                    vx: (Math.random() - 0.5) * 6,
-                                    vy: (Math.random() - 0.5) * 6
-                                });
-                            }
-                        }
-
-                        // Remove the frozen snake from the survivors' view
-                        remoteSnakes.delete(msg.id);
-                    }
-                });
-            } catch (e) {
-                console.warn('[MP] failed to init:', e);
+            if (msg.type === 'welcome') {
+                mpId = msg.id;
+                // Tag our own snake so we can tell ourselves apart
+                playerSnake.id = mpId;
+            } else if (msg.type === 'init' || msg.type === 'state') {
+                applyServerState(msg);
+            } else if (msg.type === 'death') {
+                // Remote snake died — server already spawned its pellets
+                remoteSnakes.delete(msg.id);
+                // If it was us, the next state update will omit our id
             }
+        });
+    } catch (err) {
+        console.warn('[MP] failed to init:', err);
+    }
+}
+
+// ---- Apply a full snapshot from the server ----
+function applyServerState(msg) {
+    // 1. Food — replace wholesale
+    serverFood = msg.food || [];
+
+    // 2. Snakes — update remote, gently correct self
+    const seenIds = new Set();
+    for (const s of msg.snakes) {
+        seenIds.add(s.id);
+
+        if (s.id === mpId) {
+            // This is us — reconcile position, adopt authoritative size
+            const dx = playerSnake.x - s.x;
+            const dy = playerSnake.y - s.y;
+            const drift = Math.sqrt(dx * dx + dy * dy);
+
+            if (drift > 200) {
+                // Big drift (spawn, teleport, or heavy lag) — hard snap
+                playerSnake.x = s.x;
+                playerSnake.y = s.y;
+            } else if (drift > 20) {
+                // Small drift — soft correction
+                playerSnake.x -= dx * 0.15;
+                playerSnake.y -= dy * 0.15;
+            }
+            // Adopt server's length/size so growth is fair
+            playerSnake.length = Math.max(playerSnake.length, s.len);
+            playerSnake.targetSize = s.sz;
+            playerSnake.mass = s.mass;
+            continue;
         }
 
-        initMultiplayer();
+        // Remote snake — build or update
+        let remote = remoteSnakes.get(s.id);
+        if (!remote) {
+            remote = {
+                id: s.id,
+                name: s.name,
+                color: `hsl(${s.hue}, 100%, 50%)`,
+                size: s.sz,
+                targetSize: s.sz,
+                length: s.len,
+                mass: s.mass || 0,
+                boostRamp: 0,
+                x: s.x,
+                y: s.y,
+                direction: s.dir,
+                isAlive: true,
+                snapshots: [],
+                segments: [],
+                vx: 0,
+                vy: 0,
+                lastX: undefined,
+                lastY: undefined
+            };
+            remoteSnakes.set(s.id, remote);
+        }
+
+        const now = performance.now();
+        const lastT = remote.snapshots.length
+            ? remote.snapshots[remote.snapshots.length - 1].time
+            : 0;
+        const pushT = Math.max(now, lastT + 1);
+
+        remote.snapshots.push({
+            time: pushT,
+            x: s.x,
+            y: s.y,
+            dir: s.dir,
+            speed: 3,
+            targetSize: s.sz,
+            length: s.len,
+            mass: s.mass || 0,
+            boost: !!s.boost
+        });
+
+        const targetBoost = s.boost ? 1 : 0;
+        remote.boostRamp += (targetBoost - remote.boostRamp) * 0.25;
+
+        while (remote.snapshots.length > 0 &&
+               now - remote.snapshots[0].time > 1500) {
+            remote.snapshots.shift();
+        }
+    }
+
+    // Remove remote snakes the server didn't mention
+    for (const id of [...remoteSnakes.keys()]) {
+        if (!seenIds.has(id)) remoteSnakes.delete(id);
+    }
+
+    // Detect our own death — server no longer lists us
+    if (mpId && !seenIds.has(mpId) && playerSnake.isAlive) {
+        playerSnake.isAlive = false;
+        document.getElementById('final-score').textContent = score;
+        setTimeout(() => { startFadeToMenu(); }, 800);
+    }
+}
 
         setupInputHandlers();
     </script>
