@@ -3083,6 +3083,7 @@ let mpId = null;
 let mpConnected = false;
 let mpLastSendTime = 0;
 const MP_SEND_INTERVAL_MS = 33;
+const remoteSnakes = new Map();
 
 function initMultiplayer() {
     try {
