@@ -803,9 +803,12 @@
             };
         }
         const SEGMENT_SPACING = 4;
+        const LEN_FLOOR = 3000;
+        const LEN_SPAN  = 7000;
+        const START_SF  = 2.0;
+        const MAX_SF    = 9.0;
         const BOOST_RAMP_MS = 150;   // time to reach full boost speed (higher = smoother)
-        const INPUT_LAG_MS = 20;
-        const SPINE_RADIUS_SCALE = 0.55;   // (kept for compatibility)
+        const INPUT_LAG_MS = 20;        const SPINE_RADIUS_SCALE = 0.55;   // (kept for compatibility)
         const SPINE_HITBOX_RADIUS = 6;      // fixed thin line — never grows
         const HEAD_HITBOX_SCALE = 1.0;      // head = full visual size
         const MAX_AI_LENGTH = 300;
