@@ -2142,8 +2142,14 @@
                             mpId = msg.id;
                         } else if (msg.type === "init" || msg.type === "state") {
                             applyServerState(msg);
-                        } else if (msg.type === "death") {
-                            if (msg.id !== mpId) {
+                                                } else if (msg.type === "death") {
+                            if (msg.id === mpId) {
+                                if (playerSnake.isAlive) {
+                                    playerSnake.isAlive = false;
+                                    document.getElementById("final-score").textContent = score;
+                                    setTimeout(() => { startFadeToMenu(); }, 800);
+                                }
+                            } else {
                                 remoteSnakes.delete(msg.id);
                             }
                         }
@@ -2188,7 +2194,7 @@
                         continue;
                     }
 
-                    let remote = remoteSnakes.get(s.id);
+                                        let remote = remoteSnakes.get(s.id);
                     if (!remote) {
                         remote = {
                             id: s.id,
@@ -2206,9 +2212,11 @@
                             isAI: !!s.isAI,
                             snapshots: [],
                             segments: [],
+                            lastSeen: performance.now(),
                         };
                         remoteSnakes.set(s.id, remote);
                     }
+                    remote.lastSeen = performance.now();
                     const now = performance.now();
                     const lastT = remote.snapshots.length ? remote.snapshots[remote.snapshots.length - 1].time : 0;
                     const pushT = Math.max(now, lastT + 1);
@@ -2227,9 +2235,18 @@
                     while (remote.snapshots.length > 0 && now - remote.snapshots[0].time > 1500)
                         remote.snapshots.shift();
                 }
-                // Remove snakes the server no longer sends
+                                // Remove snakes the server no longer sends
                 for (const id of [...remoteSnakes.keys()]) if (!seen.has(id)) remoteSnakes.delete(id);
-            }
+
+                // Safety net: cull anything not seen in a state packet
+                // for 1500ms. Catches missed death messages.
+                const nowMs = performance.now();
+                for (const id of [...remoteSnakes.keys()]) {
+                    const r = remoteSnakes.get(id);
+                    if (r && nowMs - (r.lastSeen || 0) > 1500) {
+                        remoteSnakes.delete(id);
+                    }
+                }
 
             setupInputHandlers();
         </script>
