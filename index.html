@@ -1227,7 +1227,7 @@
                 }
 
                 // ---- PLAYER PLAYBACK (interpolated from server state) ----
-                const RENDER_DELAY_MS = 100;
+                const RENDER_DELAY_MS = 40;
                 if (playerSnapshots.length > 0) {
                     const playbackTime = performance.now() - RENDER_DELAY_MS;
                     const arr = playerSnapshots;
