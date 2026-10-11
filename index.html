@@ -825,10 +825,11 @@
             let lastFrameTime = 0;
             let zoom = 1;
 
-            // Server-provided state
+                        // Server-provided state
             let serverFood = []; // from server
             const remoteSnakes = new Map(); // includes AI + other players
             let playerSnapshots = []; // buffered server positions for our own snake
+            let gameReady = false;    // true only after first spawn from server
 
             // ========== FOOD GLOW CACHE ==========
             const glowCache = new Map();
@@ -940,6 +941,7 @@
                 playerSnake.boostAccumulator = 0;
                 playerSnake.boostRamp = 0;
                 playerSnake._hasSpawned = false;
+                gameReady = false;
                 boostRamp = 0;
                 currentSpeed = playerSnake.speed;
                 lastFrameTime = performance.now();
@@ -951,12 +953,13 @@
                 camera.x = playerSnake.x - canvas.width / 2;
                 camera.y = playerSnake.y - canvas.height / 2;
 
-                if (mpSocket && mpSocket.readyState === 1) {
-                    try {
-                        mpSocket.close();
-                    } catch (e) {}
+                                if (mpSocket) {
+                    try { mpSocket.close(); } catch (e) {}
+                    mpSocket = null;
                 }
                 mpId = null;
+                remoteSnakes.clear();
+                playerSnapshots = [];
                 initMultiplayer();
 
                 if (animationFrameId) cancelAnimationFrame(animationFrameId);
@@ -1392,9 +1395,19 @@
             }
 
             // ========== RENDER ==========
-            function render() {
+                        function render() {
                 ctx.fillStyle = "#0a0a15";
                 ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+                if (gameStarted && !gameReady) {
+                    ctx.fillStyle = "#ffffff";
+                    ctx.font = "bold 28px Arial, sans-serif";
+                    ctx.textAlign = "center";
+                    ctx.textBaseline = "middle";
+                    ctx.fillText("Loading...", canvas.width / 2, canvas.height / 2);
+                    return;
+                }
+
                 ctx.save();
                 ctx.scale(zoom, zoom);
                 ctx.translate(-camera.x, -camera.y);
@@ -2100,51 +2113,72 @@
             let mpLastSendTime = 0;
             const MP_SEND_INTERVAL_MS = 33;
 
-            function initMultiplayer() {
+                        function initMultiplayer() {
+                // Close and detach any previous socket so stale events
+                // don't bleed into the new session.
+                if (mpSocket) {
+                    try { mpSocket.close(); } catch (e) {}
+                    mpSocket = null;
+                }
+
+                let sock;
                 try {
-                    mpSocket = new WebSocket("wss://2slither.duckdns.org/ws");
-                    mpSocket.addEventListener("open", () => {
-                        mpSocket.send(
-                            JSON.stringify({
-                                type: "join",
-                                name: playerSnake.name,
-                                hue: savedHue,
-                            })
-                        );
-                        console.log("[MP] connected");
-                    });
-                    mpSocket.addEventListener("close", () => {
-                        console.log("[MP] closed");
-                    });
-                    mpSocket.addEventListener("error", () => {
-                        console.log("[MP] error");
-                    });
-                    mpSocket.addEventListener("message", (e) => {
-                        let msg;
-                        try {
-                            msg = JSON.parse(e.data);
-                        } catch (err) {
-                            return;
-                        }
-                        if (msg.type === "welcome") {
-                            mpId = msg.id;
-                        } else if (msg.type === "init" || msg.type === "state") {
-                            applyServerState(msg);
-                                                } else if (msg.type === "death") {
-                            if (msg.id === mpId) {
-                                if (playerSnake.isAlive) {
-                                    playerSnake.isAlive = false;
-                                    document.getElementById("final-score").textContent = score;
-                                    setTimeout(() => { startFadeToMenu(); }, 800);
-                                }
-                            } else {
-                                remoteSnakes.delete(msg.id);
-                            }
-                        }
-                    });
+                    sock = new WebSocket("wss://2slither.duckdns.org/ws");
+                    mpSocket = sock;
                 } catch (err) {
                     console.warn("[MP] failed to init:", err);
+                    return;
                 }
+
+                sock.addEventListener("open", () => {
+                    if (mpSocket !== sock) return;
+                    sock.send(JSON.stringify({
+                        type: "join",
+                        name: playerSnake.name,
+                        hue: savedHue,
+                    }));
+                    console.log("[MP] connected");
+                });
+
+                sock.addEventListener("close", () => {
+                    if (mpSocket !== sock) return;
+                    console.log("[MP] closed");
+                    // If we never got the spawn, try again
+                    if (gameStarted && !gameReady) {
+                        console.log("[MP] retrying in 1s");
+                        setTimeout(() => {
+                            if (mpSocket === sock && gameStarted && !gameReady) {
+                                initMultiplayer();
+                            }
+                        }, 1000);
+                    }
+                });
+
+                sock.addEventListener("error", () => {
+                    if (mpSocket !== sock) return;
+                    console.log("[MP] error");
+                });
+
+                sock.addEventListener("message", (e) => {
+                    if (mpSocket !== sock) return;
+                    let msg;
+                    try { msg = JSON.parse(e.data); } catch (err) { return; }
+                    if (msg.type === "welcome") {
+                        mpId = msg.id;
+                    } else if (msg.type === "init" || msg.type === "state") {
+                        applyServerState(msg);
+                    } else if (msg.type === "death") {
+                        if (msg.id === mpId) {
+                            if (playerSnake.isAlive) {
+                                playerSnake.isAlive = false;
+                                document.getElementById("final-score").textContent = score;
+                                setTimeout(() => { startFadeToMenu(); }, 800);
+                            }
+                        } else {
+                            remoteSnakes.delete(msg.id);
+                        }
+                    }
+                });
             }
 
             function sendBoost(on) {
@@ -2185,7 +2219,7 @@
                         });
                         while (playerSnapshots.length > 30) playerSnapshots.shift();
 
-                        // First packet — seed segments so the snake has a body immediately
+                                                // First packet — seed segments so the snake has a body immediately
                         if (!playerSnake._hasSpawned) {
                             playerSnake.x = s.x;
                             playerSnake.y = s.y;
@@ -2197,6 +2231,7 @@
                             for (let i = 0; i < s.len; i++) {
                                 playerSnake.segments.push({ x: s.x, y: s.y, size: s.sz });
                             }
+                            gameReady = true;
                         }
                         continue;
                     }
