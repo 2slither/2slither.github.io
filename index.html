@@ -2155,9 +2155,11 @@
                 }
             }
 
-            function applyServerState(msg) {
-                // Food
-                serverFood = msg.food || [];
+                        function applyServerState(msg) {
+                // Food — server sends this at 15 Hz, not every tick
+                if (msg.food !== undefined) {
+                    serverFood = msg.food;
+                }
 
                 const seen = new Set();
                 for (const s of msg.snakes) {
